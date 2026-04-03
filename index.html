@@ -1241,7 +1241,7 @@ Respond ONLY with valid JSON — no markdown, no backticks, no preamble. Use thi
     status.textContent = `Scanning ${state.companies.length} companies with AI...`;
     document.getElementById('scan-progress').textContent = 'Analyzing roles...';
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch('/api/claude', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1440,7 +1440,7 @@ Respond ONLY in JSON — no markdown, no backticks:
 }`;
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch('/api/claude', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
