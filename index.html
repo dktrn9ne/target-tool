@@ -1018,19 +1018,47 @@ const state = {
   selectedQueueItem: null,
 };
 
+// Pre-loaded target companies with career page URLs
+const DEFAULT_COMPANIES = [
+  { id: 1,  name: 'Cloudflare',        industry: 'Network / Security',     url: 'https://www.cloudflare.com/careers/jobs/' },
+  { id: 2,  name: 'Q2 Holdings',       industry: 'Fintech / Banking',       url: 'https://www.q2.com/careers' },
+  { id: 3,  name: 'Charles Schwab',    industry: 'Finance',                 url: 'https://www.schwabjobs.com/' },
+  { id: 4,  name: 'Dell Technologies', industry: 'Enterprise Tech',         url: 'https://jobs.dell.com/' },
+  { id: 5,  name: 'Arrive Logistics',  industry: 'Logistics / Supply Chain',url: 'https://www.arrivelogistics.com/careers/' },
+  { id: 6,  name: 'AlertMedia',        industry: 'SaaS / Emergency Comms',  url: 'https://www.alertmedia.com/careers/' },
+  { id: 7,  name: 'Abrigo',            industry: 'Fintech / Banking SaaS',  url: 'https://www.abrigo.com/careers/' },
+  { id: 8,  name: 'SonarSource',       industry: 'Developer Tools',         url: 'https://www.sonarsource.com/company/careers/' },
+  { id: 9,  name: 'Striveworks',       industry: 'AI / MLOps',              url: 'https://www.striveworks.com/careers' },
+  { id: 10, name: 'Findigs',           industry: 'Proptech / Rental',       url: 'https://www.findigs.com/careers' },
+  { id: 11, name: 'Zapier',            industry: 'Automation / No-Code',    url: 'https://zapier.com/jobs' },
+  { id: 12, name: 'PostHog',           industry: 'Dev Tools / Analytics',   url: 'https://posthog.com/careers' },
+  { id: 13, name: 'Webflow',           industry: 'No-Code / Web Dev',       url: 'https://webflow.com/careers' },
+  { id: 14, name: 'Automattic',        industry: 'Open Source / Web',       url: 'https://automattic.com/work-with-us/' },
+  { id: 15, name: 'Anthropic',         industry: 'AI / Safety Research',    url: 'https://www.anthropic.com/careers' },
+  { id: 16, name: 'GitLab',            industry: 'DevOps / Developer Tools', url: 'https://about.gitlab.com/jobs/' },
+  { id: 17, name: 'Apollo.io',         industry: 'Sales Intelligence / CRM',url: 'https://www.apollo.io/careers' },
+  { id: 18, name: 'Motive',            industry: 'Fleet / Operations Tech',  url: 'https://gomotive.com/careers/' },
+];
+
 // Load from localStorage
 function loadState() {
   try {
     const saved = localStorage.getItem('target_state');
     if (saved) {
       const parsed = JSON.parse(saved);
-      state.companies = parsed.companies || [];
+      state.companies = (parsed.companies && parsed.companies.length > 0)
+        ? parsed.companies
+        : DEFAULT_COMPANIES;
       state.resume = parsed.resume || { text: '', filename: '' };
       state.goals = parsed.goals || {};
       state.roles = parsed.roles || [];
       state.tailoredQueue = parsed.tailoredQueue || [];
+    } else {
+      state.companies = DEFAULT_COMPANIES;
     }
-  } catch(e) {}
+  } catch(e) {
+    state.companies = DEFAULT_COMPANIES;
+  }
   renderAll();
 }
 
@@ -1097,6 +1125,7 @@ function renderCompanies() {
       <div class="company-info">
         <div class="company-name">${c.name}</div>
         <div class="company-meta">${c.industry || 'No industry set'}</div>
+        ${c.url ? `<div class="company-meta" style="color:var(--teal);margin-top:2px;">⬡ Career page linked</div>` : '<div class="company-meta" style="color:var(--rose2);margin-top:2px;">⚠ No URL set</div>'}
       </div>
       <button class="company-remove" onclick="removeCompany(${c.id})">✕</button>
     </div>`;
@@ -1196,7 +1225,15 @@ async function startScan() {
   renderRoles();
 
   const companyList = state.companies.map(c => `${c.name}${c.industry ? ` (${c.industry})` : ''}`).join(', ');
+  // Collect career page URLs for server-side fetching
+  const careerUrls = state.companies
+    .filter(c => c.url)
+    .map(c => ({ company: c.name, url: c.url }));
   const goals = state.goals;
+
+  // Build a summary string of fetched career page content (injected by proxy)
+  // This will be filled in by the proxy response — for the prompt we just note what we're sending
+  const careerUrlList = careerUrls.map(c => `${c.company}: ${c.url}`).join('\n');
 
   const prompt = `You are a job market intelligence agent. Your job is to identify realistic open roles at specific companies that match a candidate's profile.
 
@@ -1214,7 +1251,12 @@ CAREER GOALS:
 TARGET COMPANIES:
 ${companyList}
 
-TASK: Generate 8-12 realistic job role matches. For each match, create a plausible current opening at one of these companies that would fit this candidate. Base these on real job market patterns for these companies. Be specific and realistic.
+TARGET CAREER PAGES:
+${careerUrlList}
+
+Using your knowledge of these companies and any current role information you have, identify the best matching roles.
+
+TASK: Using the career page content above where available, identify 8-14 REAL current open roles at these companies that match the candidate. If a career page has actual job listings, pull those specific roles. For companies where the page didn't yield clear listings, use your training knowledge of that company's typical openings. Be specific with real-sounding titles and requirements. Do not fabricate — if you see real roles in the page content, use those.
 
 Respond ONLY with valid JSON — no markdown, no backticks, no preamble. Use this exact format:
 {
@@ -1238,15 +1280,17 @@ Respond ONLY with valid JSON — no markdown, no backticks, no preamble. Use thi
 }`;
 
   try {
-    status.textContent = `Scanning ${state.companies.length} companies with AI...`;
-    document.getElementById('scan-progress').textContent = 'Analyzing roles...';
+    status.textContent = `Fetching career pages + scanning ${state.companies.length} companies...`;
+    document.getElementById('scan-progress').textContent = `Fetching ${careerUrls.length} career pages...`;
 
     const res = await fetch('/api/claude', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 4000,
+        max_tokens: 6000,
+        careerUrls: careerUrls,
+        basePrompt: prompt,
         messages: [{ role: 'user', content: prompt }]
       })
     });
